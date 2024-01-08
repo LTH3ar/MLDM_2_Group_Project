@@ -1,0 +1,443 @@
+# %% md
+# 1. Importing Libraries
+# %%
+# Importing Libraries
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torchvision import datasets
+from torchvision.transforms import transforms
+from torchmetrics import Accuracy
+from torchinfo import summary
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import datetime
+
+# %% md
+# 2. Setting up the device
+# %%
+# Setting Device
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+elif torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
+print(device)
+# %% md
+# 3. Preparing the test_data
+# %%
+# Preparing Input Data
+# prepare the dataset MNIST(1x28x28) -> (3x224x224) for AlexNet
+# Upscale the grayscale images to RGB size
+param_transform = transforms.Compose([
+    transforms.Pad(2),
+    transforms.Resize((227, 227)),
+    transforms.Grayscale(num_output_channels=3),  # Convert to 3-channel grayscale
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.1307], std=[0.3081])  # Normalize to [-1, 1] range
+])
+# %%
+# Load the dataset
+test_data = datasets.MNIST(
+    root='./dataset',
+    train=False,
+    transform=param_transform,
+    download=True)
+
+test_data_info = datasets.MNIST(
+    root='./dataset',
+    train=True,
+    download=False)
+print("MNIST dataset information:")
+print(" - Number of training samples: {}".format(len(test_data_info)))
+print(" - Number of test samples: {}".format(len(test_data)))
+print(" - Image Shape: {}".format(test_data[0][0].shape))
+print(" - Number of classes: {}".format(len(test_data.classes)))
+print(" - Samples number all classes: {}".format(test_data.targets.bincount()))
+# info about the dataset
+print(test_data_info)
+
+# plot the train dataset samples count for each class
+fig = plt.figure(figsize=(10, 10))
+plt.bar(test_data_info.classes, test_data_info.targets.bincount())
+plt.title('Train dataset samples count for each class')
+plt.xlabel('Classes')
+plt.ylabel('Samples count')
+plt.savefig('train_dataset_samples_count.png')
+plt.show()
+plt.close()
+
+# Dataset summary
+print('Test dataset:')
+print(' - Number of datapoints: {}'.format(len(test_data)))
+print(' - Image Shape: {}'.format(test_data[0][0].shape))
+print(' - Number of classes: {}'.format(len(test_data.classes)))
+print(" - Samples number all classes: {}".format(test_data.targets.bincount()))
+
+# plot the test dataset samples count for each class
+fig = plt.figure(figsize=(10, 10))
+plt.bar(test_data.classes, test_data.targets.bincount())
+plt.title('Test dataset samples count for each class')
+plt.xlabel('Classes')
+plt.ylabel('Samples count')
+plt.savefig('test_dataset_samples_count.png')
+plt.show()
+plt.close()
+# %%
+# Dataset for visualization
+# get the 10 images from the test set for visualization
+vis_size = 10
+test_data_vis = torch.utils.data.Subset(test_data, range(vis_size))
+
+# Dataset summary
+print('Test dataset for visualization:')
+print(' - Number of datapoints: {}'.format(len(test_data_vis)))
+print(' - Image Shape: {}'.format(test_data_vis[0][0].shape))
+
+# loader
+test_loader_vis = DataLoader(test_data_vis, batch_size=vis_size, shuffle=True)
+# %%
+# Create dataloaders
+if torch.cuda.is_available():
+    BATCH_SIZE = 128
+elif torch.backends.mps.is_available():
+    BATCH_SIZE = 128
+else:
+    BATCH_SIZE = 64
+test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=True)
+
+# Dataloader summary
+print('Test dataloader:')
+print(' - Number of batches: {}'.format(len(test_loader)))
+
+
+# %% md
+# 4. Loading the model
+# %%
+# Define the model AlexNet specific for the transformed MNIST
+class AlexNet(nn.Module):
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.features = nn.Sequential(
+            # ============================================================================== #
+            # 1st conv layer
+            # input: 3x224x224 (upscaled from 1x28x28)
+            # output: 96x55x55
+            nn.Conv2d(in_channels=3, out_channels=96, kernel_size=11, stride=4, padding=0, ),
+            # activation function: ReLU
+            nn.ReLU(),
+            # max pooling layer with kernel size 3 and stride 2
+            # output: 96x27x27
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            # ============================================================================== #
+
+            # ============================================================================== #
+            # 2nd conv layer
+            # input: 96x27x27
+            # output: 256x27x27
+            nn.Conv2d(in_channels=96, out_channels=256, kernel_size=5, stride=1, padding=2),
+            # activation function: ReLU
+            nn.ReLU(),
+            # max pooling layer with kernel size 3 and stride 2
+            # output: 256x13x13
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            # ============================================================================== #
+
+            # ============================================================================== #
+            # 3rd conv layer
+            # input: 256x13x13
+            # output: 384x13x13
+            nn.Conv2d(in_channels=256, out_channels=384, kernel_size=3, stride=1, padding=1),
+            # activation function: ReLU
+            nn.ReLU(),
+            # ============================================================================== #
+
+            # ============================================================================== #
+            # 4th conv layer
+            # input: 384x13x13
+            # output: 384x13x13
+            nn.Conv2d(in_channels=384, out_channels=384, kernel_size=3, stride=1, padding=1),
+            # activation function: ReLU
+            nn.ReLU(),
+            # ============================================================================== #
+
+            # ============================================================================== #
+            # 5th conv layer
+            # input: 384x13x13
+            # output: 256x13x13
+            nn.Conv2d(in_channels=384, out_channels=256, kernel_size=3, stride=1, padding=1),
+            # activation function: ReLU
+            nn.ReLU(),
+            # max pooling layer with kernel size 3 and stride 2
+            # output: 256x6x6
+            nn.MaxPool2d(kernel_size=3, stride=2)
+            # ============================================================================== #
+        )
+
+        self.classifier = nn.Sequential(
+            # flatten
+            nn.Flatten(),  # 256*5*5 = 6400
+            # ============================================================================== #
+            # 1st fc layer Dense: 4096 fully connected neurons
+            nn.Dropout(p=0.5),  # dropout layer with p=0.5
+            nn.Linear(in_features=256 * 6 * 6, out_features=4096),  # 256*5*5
+            nn.ReLU(),
+            # ============================================================================== #
+
+            # ============================================================================== #
+            # 2nd fc layer Dense: 4096 fully connected neurons
+            nn.Dropout(p=0.5),  # dropout layer with p=0.5
+            nn.Linear(in_features=4096, out_features=4096),  # 4096
+            nn.ReLU(),
+            # ============================================================================== #
+
+            # ============================================================================== #
+            # 3rd fc layer Dense: 10 fully connected neurons
+            nn.Linear(in_features=4096, out_features=num_classes)  # 4096
+            # ============================================================================== #
+
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)  # flatten
+        x = self.classifier(x)
+        return x
+
+
+# %%
+# Define the loss function
+loss_fn = nn.CrossEntropyLoss().to(device)
+accuracy = Accuracy(task='multiclass', num_classes=10).to(device)
+# %%
+# Log the test
+date_time = datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+# %%
+MODE = "multiple_tests"
+if MODE == "single_test":
+    # Load the model
+    model = AlexNet().to(device)
+    print(model)
+    # Load the model weights
+    model_name = 'AlexNet'
+    model.load_state_dict(torch.load(os.path.join('models', model_name), map_location=device))
+    # Model summary
+    # summary(model, input_size=(1, 1, 28, 28), verbose=2, device=device)
+    summary(model, input_size=(1, 3, 227, 227), verbose=2, device=device)
+    # Calculate model weights size
+    model_size = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'Model size: {model_size} parameters')
+    print('Model weights size: {:.2f} MB'.format(sum(p.numel() for p in model.parameters()) / (1024 * 1024)))
+    # Set the model to evaluation mode
+    model.eval()
+
+    # Create the log directory
+    test_folder_name = f"test_{model_name}_{date_time}"
+    log_dir = os.path.join('test_logs', test_folder_name)
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+
+elif MODE == "multiple_tests":
+    models_lst = os.listdir('models')
+    models_lst.sort()
+    print(models_lst)
+    # create the log directory
+    test_folder_name = f"test_{date_time}"
+    log_dir = os.path.join('test_logs', test_folder_name)
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+# %%
+# Test the model
+y_true = []
+y_pred = []
+if MODE == "single_test":
+    with torch.no_grad():
+        acc_tmp = []
+        loss_tmp = []
+        for batch_idx, (data, target) in enumerate(test_loader):
+            # Move the data to device
+            data = data.to(device)
+            target = target.to(device)
+
+            # Forward pass
+            output = model(data)
+            loss = loss_fn(output, target)
+            acc = accuracy(output, target)
+
+            # save the loss and accuracy
+            loss_tmp.append(loss.item())
+            acc_tmp.append(acc.item())
+
+            # save the true and predicted labels for confusion matrix
+            y_true.extend(target.cpu().numpy())
+            y_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+
+            # Print the loss and accuracy
+            if batch_idx % 10 == 0:
+                print('Test Batch {}/{}: Loss: {:.6f}, Accuracy: {:.6f}'.format(
+                    batch_idx, len(test_loader), loss.item(), acc.item()))
+
+        # Calculate the average loss and accuracy
+        avg_loss = sum(loss_tmp) / len(loss_tmp)
+        avg_acc = sum(acc_tmp) / len(acc_tmp)
+        print('Test: Average Loss: {:.6f}, Average Accuracy: {:.6f}'.format(avg_loss, avg_acc))
+        writer.add_scalar(tag="Accuracy", scalar_value=avg_acc, global_step=0)
+        writer.add_scalar(tag="Loss", scalar_value=avg_loss, global_step=0)
+elif MODE == "multiple_tests":
+    acc_lst = []
+    loss_lst = []
+    for model_name in models_lst:
+        # Load the model
+        model = AlexNet().to(device)
+        # Load the model weights
+        model.load_state_dict(torch.load(os.path.join('models', model_name), map_location=device))
+        # Model summary
+        summary(model, input_size=(1, 3, 227, 227), verbose=2, device=device)
+        
+        # Calculate model weights size
+        model_size = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f'Model size: {model_size} parameters')
+        print('Model weights size: {:.2f} MB'.format(sum(p.numel() for p in model.parameters()) / (1024 * 1024)))
+        # Set the model to evaluation mode
+        model.eval()
+
+        with torch.no_grad():
+            acc_tmp = []
+            loss_tmp = []
+            y_true_tmp = []
+            y_pred_tmp = []
+            for batch_idx, (data, target) in enumerate(test_loader):
+                # Move the data to device
+                data = data.to(device)
+                target = target.to(device)
+
+                # Forward pass
+                output = model(data)
+                loss = loss_fn(output, target)
+                acc = accuracy(output, target)
+
+                # save the loss and accuracy
+                loss_tmp.append(loss.item())
+                acc_tmp.append(acc.item())
+
+                # save the true and predicted labels for confusion matrix
+                y_true_tmp.extend(target.cpu().numpy())
+                y_pred_tmp.extend(torch.argmax(output, dim=1).cpu().numpy())
+
+                # Print the loss and accuracy
+                if batch_idx % 10 == 0:
+                    print('Test Batch {}/{}: Loss: {:.6f}, Accuracy: {:.6f}'.format(
+                        batch_idx, len(test_loader), loss.item(), acc.item()))
+
+            # add true and predicted labels to the main list
+            y_true.append(y_true_tmp)
+            y_pred.append(y_pred_tmp)
+
+            # Calculate the average loss and accuracy
+            avg_loss = (sum(loss_tmp) / len(loss_tmp))
+            avg_acc = (sum(acc_tmp) / len(acc_tmp)) * 100
+        print('Test: Average Loss: {:.6f}, Average Accuracy: {:.6f}'.format(avg_loss, avg_acc))
+        # for each model add the accuracy and loss to the tensorboard so that we can compare them like a line
+        acc_lst.append(avg_acc)
+        loss_lst.append(avg_loss)
+
+        # clean the GPU memory
+        # clear cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        else:
+            torch.empty_cache()
+        # release the model from GPU memory
+        model = None
+
+    for i in range(len(models_lst)):
+        writer.add_scalar(tag="Accuracy", scalar_value=acc_lst[i], global_step=int((i + 1) * 10))
+        writer.add_scalar(tag="Loss", scalar_value=loss_lst[i], global_step=int((i + 1) * 10))
+# %%
+# Confusion matrix all test data
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.metrics import classification_report
+
+if MODE == "single_test":
+    # Confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    print(cm)
+    # Classification report
+    print(classification_report(y_true, y_pred, target_names=test_data.classes))
+    # Plot the confusion matrix
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot(cmap=plt.cm.Blues)
+    plt.savefig(os.path.join(log_dir, 'confusion_matrix.png'))
+    plt.show()
+    plt.close()
+    with open(os.path.join(log_dir, 'classification_report.txt'), 'w') as f:
+        f.write(classification_report(y_true, y_pred, target_names=test_data.classes))
+elif MODE == "multiple_tests":
+    for i in range(len(models_lst)):
+        # Confusion matrix
+        cm = confusion_matrix(y_true[i], y_pred[i])
+        print(cm)
+        # Classification report
+        print(classification_report(y_true[i], y_pred[i], target_names=test_data.classes))
+        # Plot the confusion matrix
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+        disp.plot(cmap=plt.cm.Blues)
+        plt.savefig(os.path.join(log_dir, f'confusion_matrix_{models_lst[i]}.png'))
+        plt.show()
+        plt.close()
+        with open(os.path.join(log_dir, f'classification_report_{models_lst[i]}.txt'), 'w') as f:
+            f.write(classification_report(y_true[i], y_pred[i], target_names=test_data.classes))
+            f.write('\n')
+            f.write('Confusion matrix:\n')
+            f.write(str(cm))
+
+# %%
+# Visualize the bar chart accuracy of models, V1, V2, V3, V4 (range 97-100%)
+if MODE == "multiple_tests":
+    labels = ['V1', 'V2', 'V3', 'V4']
+    fig = plt.figure(figsize=(10, 10))
+    plt.bar(labels, acc_lst)
+    plt.title('Accuracy of models')
+    plt.xlabel('Models')
+    plt.ylabel('Accuracy')
+    plt.ylim(97, 100)
+    plt.savefig(os.path.join(log_dir, 'accuracy_models.png'))
+    plt.show()
+    plt.close()
+# %%
+# Close the writer
+writer.flush()
+writer.close()
+# %%
+# Release GPU memory cache
+# clear cache
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()
+elif torch.backends.mps.is_available():
+    torch.mps.empty_cache()
+else:
+    torch.empty_cache()
+
+# Release model from GPU memory
+model = None
+
+# release all loaded data
+data_vis = None
+target_vis = None
+data = None
+target = None
+data_loader = None
+data_loader_vis = None
+test_data = None
+test_data_vis = None
+test_loader = None
+test_loader_vis = None
+
+print('Done!')
