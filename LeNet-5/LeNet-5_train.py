@@ -253,9 +253,9 @@ for epoch in range(NUM_EPOCHS):
 
     # Calculate average loss and accuracy over an epoch
     avg_loss_train = np.mean(loss_train)
-    avg_acc_train = accuracy(torch.cat(y_pred_train), torch.cat(y_true_train)) * 100
+    avg_acc_train = accuracy(torch.tensor(y_pred_train), torch.tensor(y_true_train)) * 100
     avg_loss_val = np.mean(loss_val)
-    avg_acc_val = accuracy(torch.cat(y_pred_val), torch.cat(y_true_val)) * 100
+    avg_acc_val = accuracy(torch.tensor(y_pred_val), torch.tensor(y_true_val)) * 100
 
     # Log average loss and accuracy of an epoch
     writer.add_scalars(main_tag='Accuracy train/validation',
@@ -288,7 +288,7 @@ for epoch in range(NUM_EPOCHS):
 
     # log test every epoch
     avg_loss_test = np.mean(loss_test)
-    avg_acc_test = accuracy(torch.cat(y_pred_test), torch.cat(y_true_test)) * 100
+    avg_acc_test = accuracy(torch.tensor(y_pred_test), torch.tensor(y_true_test)) * 100
     # writer.add_scalars(main_tag='Accuracy & Loss/test', tag_scalar_dict={'Accuracy': avg_acc_test, 'Loss': avg_loss_test}, global_step=epoch_count)
     writer.add_scalar('Accuracy/test', avg_acc_test, epoch_count)
     writer.add_scalar('Loss/test', avg_loss_test, epoch_count)
